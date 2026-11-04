@@ -1,0 +1,6 @@
+{
+  "name": "claude-cli-status-orb-mod",
+  "description": "A Cylon-style status orb for the Claude Code CLI.",
+  "owner": { "name": "Michael Todd" },
+  "plugins": [{ "name": "larson-scanner", "source": "./" }]
+}
