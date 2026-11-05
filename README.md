@@ -29,6 +29,8 @@ claude plugin install larson-scanner --marketplace michaelgtodd/claude-cli-statu
 
 - **Working:** a red orb with a white-hot center sweeps the full width, leaving a glowing trail.
   When work starts it launches straight into a full sweep, so its first pass reaches the edge.
+  Background shells, subagents and workflows count as work: the orb keeps sweeping until they
+  finish, even after Claude has handed the prompt back.
 - **Finishing:** each swing falls shorter than the last as it slows into the center, cooling
   through magenta, violet and blue to cyan.
 - **Idle:** the cyan orb rests in the center and breathes, brighter and wider, then dimmer and
@@ -50,7 +52,8 @@ orb.
   no Claude Code imports, so it can be previewed and tested on its own.
 - `hooks/register.tsx` draws it as one row of colored cells (a `Raster`) in the hint line under
   the prompt, and repaints that row 30 times a second with `$.ui.blit`. It knows Claude is
-  working from the hint line's `isWorking` and the turn events.
+  working from the hint line's `isWorking` and the turn events, sees background shells in the
+  hint line's text, polls `$.agent.list()` for subagents, and reads a turn's end for workflows.
 
 ## Develop
 
