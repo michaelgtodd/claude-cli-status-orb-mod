@@ -1,34 +1,46 @@
 // A Larson scanner (the Cylon look) for one row of terminal cells.
 //
-// Working: a red orb sweeps the full width with a glowing trail behind it. When
-// work starts it launches straight into a full sweep, so its first pass reaches
-// the edge. Idle: the sweep narrows and slows into the center (each swing falls
-// shorter than the last), the color cools through violet to cyan, and once it
-// settles the orb breathes.
+// Working: a red orb sweeps the full width, flared ahead of it and tapering into
+// a long trail behind, the line stepping thinner as it cools. Each time it reaches
+// an edge its speed drifts a little. When work starts it launches straight into a
+// full sweep, so its first pass reaches the edge. Idle: the sweep narrows and slows
+// into the center (each swing falls shorter than the last), the color cools through
+// violet to cyan, and once it settles the orb breathes.
 //
 // Pure: no Claude Code imports, so it can be previewed and tested anywhere.
 
 /** Milliseconds per frame. */
 export const FRAME_MS = 33
 
-/** One full left-right-left sweep while working. */
-const SWEEP_PERIOD_S = 1.8
+/** One full left-right-left sweep while working, at the default speed. */
+const SWEEP_PERIOD_S = 2.4
+/** The most the speed may change at an edge, as a share of itself. */
+const SPEED_STEP = 0.05
+/** How far the speed may drift from the default, as a share of it. */
+const SPEED_RANGE = 0.3
 /** How quickly the sweep narrows once work stops. */
 const SETTLE_S = 0.9
 /** How quickly the orb gets up to full speed when it launches. */
 const LAUNCH_S = 0.2
 /** How long the trail glows behind the orb. */
-const TRAIL_S = 0.3
+const TRAIL_S = 0.35
 /** One breath while resting. */
 const PULSE_PERIOD_S = 2.6
 
 /** Hues, in degrees. The cooling runs red, magenta, violet, blue, cyan. */
 const HUE_WORKING = 360
 const HUE_IDLE = 185
+/** How far toward orange (or, cooled, blue) the core's center leans. */
+const CORE_HUE_SHIFT = 20
+
+/** How bright the flare must be for the line to step up to each thickness. */
+const FLARE_THICK = 0.55
+const FLARE_HEAVY = 0.3
 
 /** The terminal's default color, as a Raster cell takes it. */
 export const DEFAULT_COLOR = 0x01000000
-const GLYPH = { line: 0x2501, full: 0x2588, left: 0x258c, right: 0x2590 } as const // ━ █ ▌ ▐
+// ─ ━ ▬ █ ▌ ▐
+const GLYPH = { thin: 0x2500, heavy: 0x2501, thick: 0x25ac, full: 0x2588, left: 0x258c, right: 0x2590 } as const
 
 type RGB = readonly [number, number, number]
 
@@ -39,6 +51,8 @@ export interface Scanner {
   phase: number
   /** How fast the phase turns, as a share of full speed. */
   spin: number
+  /** Full speed, as a share of the default. */
+  speed: number
   /** 0 red (working), 1 cyan (idle). */
   tint: number
   /** How much the orb breathes, 0 to 1. */
@@ -53,7 +67,7 @@ export interface Scanner {
 
 /** A scanner at rest: cyan, centered, breathing (sessions start idle). */
 export function createScanner(): Scanner {
-  return { amp: 0, phase: 0, spin: 0.3, tint: 1, pulse: 1, time: 0, lastX: undefined, heat: [] }
+  return { amp: 0, phase: 0, spin: 0.3, speed: 1, tint: 1, pulse: 1, time: 0, lastX: undefined, heat: [] }
 }
 
 /** Where the orb is, in cells from the left edge. */
@@ -75,8 +89,28 @@ function launch(s: Scanner): void {
   s.amp = 1
 }
 
-/** Advances the scanner by `dt` seconds. */
-export function stepScanner(s: Scanner, dt: number, working: boolean, width: number): void {
+/**
+ * The speed after an edge: up to `SPEED_STEP` either way, `random` (0 to 1) saying
+ * how far, held within `SPEED_RANGE` of the default.
+ */
+export function nextSpeed(speed: number, random: number): number {
+  const changed = speed * (1 + SPEED_STEP * (2 * random - 1))
+  return Math.min(1 + SPEED_RANGE, Math.max(1 - SPEED_RANGE, changed))
+}
+
+/** True when a step of the phase crosses an edge, where the sine peaks. */
+function reachesEdge(from: number, to: number): boolean {
+  return Math.floor(from / Math.PI - 0.5) !== Math.floor(to / Math.PI - 0.5)
+}
+
+/** Advances the scanner by `dt` seconds. `random` picks each change of speed. */
+export function stepScanner(
+  s: Scanner,
+  dt: number,
+  working: boolean,
+  width: number,
+  random: () => number = Math.random,
+): void {
   dt = Math.min(Math.max(dt, 0), 0.25)
   s.time += dt
   const ease = (tau: number) => 1 - Math.exp(-dt / tau)
@@ -95,7 +129,9 @@ export function stepScanner(s: Scanner, dt: number, working: boolean, width: num
   }
   const resting = !working && s.amp < 0.03
   s.pulse += ((resting ? 1 : 0) - s.pulse) * ease(resting ? 0.6 : 0.12)
-  s.phase = (s.phase + ((dt * 2 * Math.PI) / SWEEP_PERIOD_S) * s.spin) % (2 * Math.PI)
+  const phase = s.phase + ((dt * 2 * Math.PI) / SWEEP_PERIOD_S) * s.spin * s.speed
+  if (working && reachesEdge(s.phase, phase)) s.speed = nextSpeed(s.speed, random())
+  s.phase = phase % (2 * Math.PI)
 
   if (s.heat.length !== width) {
     s.heat = new Array(width).fill(0)
@@ -117,25 +153,25 @@ export function renderCells(s: Scanner, width: number): Uint32Array {
   const x = orbX(s, width)
   const hue = HUE_WORKING - (HUE_WORKING - HUE_IDLE) * s.tint
   const palette = {
-    core: hsv(hue, 0.3, 1), // the orb's white-hot center
-    hot: hsv(hue, 1, 1), // its edges, and the glow
-    track: hsv(hue, 1, 0.32), // the unlit line
+    core: hsv(hue + CORE_HUE_SHIFT, 0.45, 1), // the orb's white-hot center
+    hot: hsv(hue, 1, 1), // its edges, and the flare
+    track: hsv(hue, 1, 0.22), // the unlit line
   }
 
   // Breathing: brighter and wider on the in-breath, dimmer and tighter on the out.
   const breath = 0.5 - 0.5 * Math.cos((2 * Math.PI * s.time) / PULSE_PERIOD_S)
   const bright = 1 - s.pulse * 0.5 * (1 - breath)
-  const radius = 1.75 + s.pulse * 1 * breath // half-width of the solid orb, in cells
-  const sigma = 3 + s.pulse * 4 * breath // the glow around it
+  const radius = 3 - s.pulse * (1.25 - breath) // half-width of the solid orb, in cells
+  const sigma = 4.5 + s.pulse * (4 * breath - 1.5) // the flare around it
 
   for (let i = 0; i < width; i++) {
     const d = i - x
     const glow = Math.exp(-(d * d) / (2 * sigma * sigma)) * bright
-    const trail = (s.heat[i] ?? 0) * 0.85 * (1 - s.pulse)
+    const trail = (s.heat[i] ?? 0) * (1 - s.pulse)
     const left = Math.abs(i - 0.25 - x) <= radius
     const right = Math.abs(i + 0.25 - x) <= radius
 
-    let glyph: number = GLYPH.line
+    let glyph: number
     let color: RGB
     if (left || right) {
       // The orb: white-hot at its center, its own color at its edges.
@@ -143,7 +179,10 @@ export function renderCells(s: Scanner, width: number): Uint32Array {
       const heat = Math.max(0, 1 - Math.abs(d) / (radius + 0.5))
       color = scale(mix(palette.hot, palette.core, heat * heat), 0.35 + 0.65 * bright)
     } else {
-      color = mix(palette.track, palette.hot, Math.min(1, Math.max(glow, trail)))
+      // The flare: the brighter it burns, the thicker the line.
+      const flare = Math.min(1, Math.max(glow, trail))
+      glyph = flare > FLARE_THICK ? GLYPH.thick : flare > FLARE_HEAVY ? GLYPH.heavy : GLYPH.thin
+      color = mix(palette.track, palette.hot, Math.sqrt(flare))
     }
     cells[i * 3] = glyph
     cells[i * 3 + 1] = (Math.round(color[0]) << 16) | (Math.round(color[1]) << 8) | Math.round(color[2])

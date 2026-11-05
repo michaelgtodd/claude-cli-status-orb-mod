@@ -27,8 +27,10 @@ claude plugin install larson-scanner --marketplace michaelgtodd/claude-cli-statu
 
 ## What it does
 
-- **Working:** a red orb with a white-hot center sweeps the full width, leaving a glowing trail.
-  When work starts it launches straight into a full sweep, so its first pass reaches the edge.
+- **Working:** a red orb with a white-hot center sweeps the full width, flared ahead of it and
+  tapering into a long trail that steps thinner as it cools. Each time it reaches an edge its speed
+  shifts by up to 5% either way, staying within 30% of the default. When work starts it launches
+  straight into a full sweep, so its first pass reaches the edge.
   Background shells, subagents and workflows count as work: the orb keeps sweeping until they
   finish, even after Claude has handed the prompt back.
 - **Finishing:** each swing falls shorter than the last as it slows into the center, cooling
@@ -37,7 +39,8 @@ claude plugin install larson-scanner --marketplace michaelgtodd/claude-cli-statu
   tighter.
 
 Claude Code's own hint line (`esc to interrupt` and the rest) stays where it is, just above the
-orb.
+orb, and the orb runs the full width of the terminal, beneath any docked pane. The list of running
+subagents stays below the orb: Claude Code draws it last, on the screen's bottom row.
 
 ## Requirements
 
@@ -50,6 +53,8 @@ orb.
 
 - `hooks/scanner.ts` is the animation: where the orb is, how the trail fades, the colors. It has
   no Claude Code imports, so it can be previewed and tested on its own.
+- `hooks/ruler.ts` measures the row, since a mod's viewport shrinks to the transcript beside a
+  docked pane.
 - `hooks/register.tsx` draws it as one row of colored cells (a `Raster`) in the hint line under
   the prompt, and repaints that row 30 times a second with `$.ui.blit`. It knows Claude is
   working from the hint line's `isWorking` and the turn events, sees background shells in the

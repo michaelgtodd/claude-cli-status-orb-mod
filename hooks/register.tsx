@@ -10,8 +10,9 @@ import type { AgentInfo, Register } from 'claude-code'
 import { FRAME_MS, createScanner, renderCells, stepScanner } from './scanner.ts'
 
 const KEY = 'scanner'
+const RULER = 'ruler'
 const MAX_COLUMNS = 512 // a Raster's limit
-const HINT_INDENT = 2
+const HINT_INDENT = 2 // the hint row's inset, on each side
 /** How often to read the session's agents: a change of status raises no event. */
 const AGENT_POLL_MS = 500
 /**
@@ -35,6 +36,7 @@ export const register: Register = on => {
   let shellRunning = false
   let agentActive = false
   let workflowRunning = false
+  let rowColumns: number | undefined // the hint row's width, once ruler.ts measures it
   let site: { requestId: string; columns: number } | undefined
   let last = Date.now()
 
@@ -82,19 +84,36 @@ export const register: Register = on => {
     return next(e)
   })
 
+  on('ui.message', ($, e, next) => {
+    if (e.element === RULER && typeof e.data === 'number' && e.data > 0 && e.data !== rowColumns) {
+      rowColumns = e.data
+      $.ui.invalidate('ui.render')
+    }
+    return next(e)
+  })
+
   on('ui.render', { component: 'PromptHint' }, async ($, e, next) => {
     working = e.props.isWorking
     shellRunning = hasRunningShell(e.props.hint)
     const hint = await next(e)
     if (e.surface !== 'terminal') return hint
 
-    // The hint row is indented two columns; a wider Raster is clipped at the right.
-    const columns = Math.max(1, Math.min(MAX_COLUMNS, (e.viewport?.columns ?? 80) - HINT_INDENT))
+    // From the row's left inset to the screen's right edge. Until the ruler answers,
+    // the viewport stands in, which is short while a pane is docked. A wider Raster
+    // is clipped at the right.
+    const room = rowColumns === undefined ? (e.viewport?.columns ?? 80) - HINT_INDENT : rowColumns + HINT_INDENT
+    const columns = Math.max(1, Math.min(MAX_COLUMNS, room))
     site = { requestId: e.requestId, columns }
-    const { Box, Raster } = $.ui.resolve(e)
+    const { Box, Client, Raster } = $.ui.resolve(e)
+    // The Raster stands outside the flow, so its width can't change what the ruler reads.
     return (
       <Box flexDirection="column">
-        <Raster key={KEY} columns={columns} rows={1} cells={encode(renderCells(scanner, columns))} />
+        <Box flexDirection="row">
+          <Client key={RULER} module="./ruler.ts" flexGrow={1} height={1} />
+          <Box position="absolute">
+            <Raster key={KEY} columns={columns} rows={1} cells={encode(renderCells(scanner, columns))} />
+          </Box>
+        </Box>
         {hint}
       </Box>
     )

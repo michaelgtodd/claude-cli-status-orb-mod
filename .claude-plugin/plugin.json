@@ -1,6 +1,6 @@
 {
   "name": "larson-scanner",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A Cylon-style status orb under the prompt: a red orb sweeps while Claude works, then slows into the center, turns cyan, and pulses when idle.",
   "author": { "name": "Michael Todd" },
   "license": "MIT"
